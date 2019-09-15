@@ -13,13 +13,21 @@ from shutil import rmtree
 
 ##### Method ###################################################################################################################
 
-class idleProject():
+class idleProject(QObject):
+    # signal
+    pSignal = pyqtSignal(int, str) # progressbar
+    aSignal = pyqtSignal(bool) # active or not
 
     # 프로그램 내 사용하는 변수 선언&초기화
     def __init__(self, *args, **kwargs):
+        super().__init__()
+
         self.test = idle.Ui_MainWindow()
         self.test.setupUi(MainWindow)
         self.videoFilePath = None
+
+        # thread
+        self.th = Worker(parent=self)
 
         # 프로그램 내 폰트 등록
         QFontDatabase.addApplicationFont("font/NanumSquareEB_0.ttf")
@@ -86,10 +94,21 @@ class idleProject():
 
     # 프로그램 구동 메소드
     def start(self):
-        self.setProgressbar(0)
-        self.test.progressValue.setText("Select your .csq file")
+        self.setProgressbar(0, "Select your .csq file")
         self.test.loadFileBtn.clicked.connect(self.loadVideo)
         self.test.extractBtn.clicked.connect(self.extract)
+
+        self.pSignal.connect(self.updateProgressbar)
+        self.aSignal.connect(self.disableGUI)
+
+    def updateProgressbar(self, progress, msg):
+        self.setProgressbar(progress, msg)
+
+    def disableGUI(self, disable):
+        if disable:
+            self.disableWidget()
+        else:
+            self.enableWidget()
 
     # 이미지를 인자로 받아 Preview Part에 띄워주는 메소드
     def setPreviewImage(self, imagePath):
@@ -97,11 +116,12 @@ class idleProject():
         self.test.previewImg.setStyleSheet("background-color: #000000;\nborder-image:url(" + imagePath + ");")
 
     # 정수를 인자로 받아 Progress Bar를 핸들링하는 메소드
-    def setProgressbar(self, num=None, text=None):
-        if text is None:
-            tmp = "EXTRACTING ... " + str(num) + "%" #TODO
-        self.test.progressValue.setText(tmp)
+    def setProgressbar(self, num, text):
+        # if text is None:
+        #     tmp = "EXTRACTING ... " + str(num) + "%" #TODO
         self.test.progressBar.setValue(num)
+        self.test.progressValue.setText(text)
+       
 
     def disableWidget(self):
         self.test.loadFileBtn.setEnabled(False)
@@ -208,15 +228,16 @@ class idleProject():
         self.savePath = self.test.savepathValue.text()
         
         # 메소드 값 초기 설정
-        self.setProgressbar(0)
+        # self.setProgressbar(0, 'init')
 
         ########################################
         ##            extract data            ##
         ########################################
-
+        option = {}
+        
         baseName = os.path.basename(self.videoFile)
         baseName = os.path.splitext(baseName)[0]
-
+        
         save_dirs = {}
         save_dirs['fff'] = os.path.join(self.savePath, baseName, 'fff')
         save_dirs['raw'] = os.path.join(self.savePath, baseName, 'raw')
@@ -224,7 +245,7 @@ class idleProject():
         save_dirs['png_color'] = os.path.join(self.savePath, baseName, 'png_color')
         save_dirs['csv_raw'] = os.path.join(self.savePath, baseName, 'csv_raw')
         save_dirs['csv_celsius'] = os.path.join(self.savePath, baseName, 'csv_celsius')
-
+        
         isSelected = {}
         isSelected['fff'] = self.isFrame
         isSelected['raw'] = self.isRawImage
@@ -232,62 +253,132 @@ class idleProject():
         isSelected['png_color'] = self.isColorImage
         isSelected['csv_raw'] = self.isRawData
         isSelected['csv_celsius'] = self.isCelsiusData
-
+        
         frameInc = 1
         if self.isFrameSkip:
             frameInc = self.frameSkipValue
             if frameInc < 1:
                 frameInc = 1
         int2Index = lambda idx : '%05d' % (int(idx))
+        
+        # pack Options
+        option['fileName'] = self.fileName
+        option['baseName'] = os.path.splitext(baseName)[0]
+        option['save_dirs'] = save_dirs
+        option['isSelected'] = isSelected
+        option['frameInc'] = frameInc
+        option['int2Index'] = int2Index
+
+        self.th.setOption(option)
+        self.th.working = True
+        self.th.start()
+        return
+
+class Worker(QThread):
+
+    def __init__(self, parent):
+        super().__init__()
+        self.parent = parent
+        self.working = True
+        self.option = None
+    
+    def setOption(self, option):
+        self.option = option
+
+    def updateProgressbar(self, progress, msg):
+        self.parent.pSignal.emit(progress, msg)
+
+    def disableGUI(self, disable):
+        self.parent.aSignal.emit(disable)
+
+    def run(self):
+        # disable Widget
+        self.disableGUI(True)
+
+        # unpack data
+        fileName = self.option['fileName']
+        save_dirs = self.option['save_dirs']
+        isSelected = self.option['isSelected']
+        frameInc = self.option['frameInc']
+        int2Index = self.option['int2Index']
+
+        # Calculate progress data
+        numList = len(glob.glob(save_dirs['fff']+'/*.fff'))
+        cur = 0
+        all = (numList/frameInc) * 5
 
         for dir in save_dirs.values():
             os.makedirs(dir, exist_ok=True)
-        
-        self.test.progressValue.setText("Splitting Frames ... ")
-        command = "./bin/perl -f ./script/split.pl -i {0} -o {1} -b {2} -p fff -x fff".format(self.videoFile, save_dirs['fff'], self.fileName)
-        print(command)
-        bin_utils.exec_os(command)
-        
-        numList = len(glob.glob(save_dirs['fff']+'/*.fff'))
 
+        # self.test.progressValue.setText("Splitting Frames ... ")
+        self.updateProgressbar(0, "Splitting Frames ... ")
+        # command = "./bin/perl -f ./script/split.pl -i {0} -o {1} -b {2} -p fff -x fff".format(self.videoFile, save_dirs['fff'], self.fileName)
+        # bin_utils.exec_os(command)
+        
         # .fff to .raw
         for idx in range(frameInc, numList+1, frameInc):
-            name = self.fileName + int2Index(idx)
+            name = fileName + int2Index(idx)
             input_name = os.path.join(save_dirs['fff'], name+'.fff')
             output_name = os.path.join(save_dirs['raw'], name+'.raw')
             bin_utils.exec_os("./bin/exiftool {0} -b -RawThermalImage > {1}".format(input_name, output_name))
+            #update progressbar
+            cur+=1
+            precent = int((cur/all)*100)
+            self.updateProgressbar(precent, "EXTRACTING ... " + str(precent) + "%")
 
         # .raw to .png(raw)
         for idx in range(frameInc, numList+1, frameInc):
-            name = self.fileName + int2Index(idx)
+            name = fileName + int2Index(idx)
             input_name = os.path.join(save_dirs['raw'], name+'.raw')
             output_name = os.path.join(save_dirs['png_raw'], name+'.png')
             bin_utils.exec_os("./bin/ffmpeg -y -f image2 -vcodec jpegls -i {0} -f image2 -vcodec png {1}".format(input_name, output_name))
+            #update progressbar
+            cur+=1
+            precent = int((cur/all)*100)
+            self.updateProgressbar(precent, "EXTRACTING ... " + str(precent) + "%")
 
-        # .png(raw) to .csv(raw)
+        self.updateProgressbar(50, "test")
+
+        # .png(raw) to .csv(raw)    
         for idx in range(frameInc, numList+1, frameInc):
-            name = self.fileName + int2Index(idx)
+            name = fileName + int2Index(idx)
             input_name = os.path.join(save_dirs['png_raw'], name+'.png')
             image2csv.image2csv(input_name, save_dirs['csv_raw']+'/')
+            #update progressbar
+            cur+=1
+            precent = int((cur/all)*100)
+            self.updateProgressbar(precent, "EXTRACTING ... " + str(precent) + "%")
 
         # .csv(raw) to .csv(celsius)
         for idx in range(frameInc, numList+1, frameInc):
-            name = self.fileName + int2Index(idx)
+            name = fileName + int2Index(idx)
             input_name = os.path.join(save_dirs['csv_raw'], name+'.csv')
             raw2celsius.raw2celsius(input_name, save_dirs['csv_celsius'])
+            #update progressbar
+            cur+=1
+            precent = int((cur/all)*100)
+            self.updateProgressbar(precent, "EXTRACTING ... " + str(precent) + "%")
 
         # .csv(celsius) to .png(rgb)
         for idx in range(frameInc, numList+1, frameInc):
-            name = self.fileName + int2Index(idx)
+            name = fileName + int2Index(idx)
             input_name = os.path.join(save_dirs['csv_celsius'], name+'.csv')
             csv2colorimg.csv2colorimg(input_name, save_dirs['png_color'])
+            #update progressbar
+            cur+=1
+            precent = int((cur/all)*100)
+            self.updateProgressbar(precent, "EXTRACTING ... " + str(precent) + "%")
 
         # remove unselected files
         for category, selected in isSelected.items():
             if not selected:
                 rmtree(save_dirs[category])
+
+        self.disableGUI(False)
         
-       
+
+
+
 ##### Main #####################################################################################################################
 
 if __name__ == "__main__":

@@ -277,7 +277,7 @@ class Ui_MainWindow(object):
 
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
-        MainWindow.setWindowTitle(_translate("MainWindow", "MainWindow"))
+        MainWindow.setWindowTitle(_translate("MainWindow", "IDLE Frame Maker ver 1.0"))
         self.extractBtn.setText(_translate("MainWindow", "EXTRACT"))
         self.loadFileBtn.setText(_translate("MainWindow", "OPEN"))
         self.previewLabel.setText(_translate("MainWindow", "PREVIEW"))
