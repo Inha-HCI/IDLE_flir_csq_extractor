@@ -268,6 +268,7 @@ class idleProject(QObject):
         option['isSelected'] = isSelected
         option['frameInc'] = frameInc
         option['int2Index'] = int2Index
+        option['videoFile'] = self.videoFile
 
         self.th.setOption(option)
         self.th.working = True
@@ -301,19 +302,23 @@ class Worker(QThread):
         isSelected = self.option['isSelected']
         frameInc = self.option['frameInc']
         int2Index = self.option['int2Index']
+        videoFile = self.option['videoFile']
 
-        # Calculate progress data
-        numList = len(glob.glob(save_dirs['fff']+'/*.fff'))
-        cur = 0
-        all = (numList/frameInc) * 5
+        
 
         for dir in save_dirs.values():
             os.makedirs(dir, exist_ok=True)
 
         # self.test.progressValue.setText("Splitting Frames ... ")
         self.updateProgressbar(0, "Splitting Frames ... ")
-        # command = "./bin/perl -f ./script/split.pl -i {0} -o {1} -b {2} -p fff -x fff".format(self.videoFile, save_dirs['fff'], self.fileName)
-        # bin_utils.exec_os(command)
+        command = "perl -f ./script/split.pl -i {0} -o {1} -b {2} -p fff -x fff".format(videoFile, save_dirs['fff'], fileName)
+        print(command)
+        bin_utils.exec_os(command)
+
+        # Calculate progress data
+        numList = len(glob.glob(save_dirs['fff']+'/*.fff'))
+        cur = 0
+        all = (numList/frameInc) * 5
         
         # .fff to .raw
         for idx in range(frameInc, numList+1, frameInc):
@@ -336,8 +341,6 @@ class Worker(QThread):
             cur+=1
             precent = int((cur/all)*100)
             self.updateProgressbar(precent, "EXTRACTING ... " + str(precent) + "%")
-
-        self.updateProgressbar(50, "test")
 
         # .png(raw) to .csv(raw)    
         for idx in range(frameInc, numList+1, frameInc):
